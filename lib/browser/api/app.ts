@@ -19,12 +19,6 @@ Object.setPrototypeOf(App.prototype, EventEmitter.prototype)
 EventEmitter.call(app as any)
 
 Object.assign(app, {
-  setApplicationMenu (menu: Electron.Menu | null) {
-    return Menu.setApplicationMenu(menu)
-  },
-  getApplicationMenu () {
-    return Menu.getApplicationMenu()
-  },
   commandLine: {
     hasSwitch: (theSwitch: string) => commandLine.hasSwitch(String(theSwitch)),
     getSwitchValue: (theSwitch: string) => commandLine.getSwitchValue(String(theSwitch)),
@@ -33,6 +27,15 @@ Object.assign(app, {
   } as Electron.CommandLine,
   enableMixedSandbox () {
     deprecate.log(`'enableMixedSandbox' is deprecated. Mixed-sandbox mode is now enabled by default. You can safely remove the call to enableMixedSandbox().`)
+  }
+})
+
+Object.defineProperty(app, 'applicationMenu', {
+  get () {
+    return Menu.getApplicationMenu()
+  },
+  set (menu: Electron.Menu | null) {
+    return Menu.setApplicationMenu(menu)
   }
 })
 
