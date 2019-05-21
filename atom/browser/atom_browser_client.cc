@@ -14,10 +14,12 @@
 #include "atom/app/manifests.h"
 #include "atom/browser/api/atom_api_app.h"
 #include "atom/browser/api/atom_api_protocol.h"
+#include "atom/browser/api/atom_api_protocol_ns.h"
 #include "atom/browser/api/atom_api_web_contents.h"
 #include "atom/browser/atom_browser_context.h"
 #include "atom/browser/atom_browser_main_parts.h"
 #include "atom/browser/atom_navigation_throttle.h"
+#include "atom/browser/atom_paths.h"
 #include "atom/browser/atom_quota_permission_context.h"
 #include "atom/browser/atom_resource_dispatcher_host_delegate.h"
 #include "atom/browser/atom_speech_recognition_manager_delegate.h"
@@ -26,6 +28,8 @@
 #include "atom/browser/io_thread.h"
 #include "atom/browser/media/media_capture_devices_dispatcher.h"
 #include "atom/browser/native_window.h"
+#include "atom/browser/net/network_context_service.h"
+#include "atom/browser/net/network_context_service_factory.h"
 #include "atom/browser/notifications/notification_presenter.h"
 #include "atom/browser/notifications/platform_notification_service.h"
 #include "atom/browser/session_preferences.h"
@@ -72,6 +76,7 @@
 #include "ppapi/host/ppapi_host.h"
 #include "printing/buildflags/buildflags.h"
 #include "services/device/public/cpp/geolocation/location_provider.h"
+#include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/resource_request_body.h"
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -531,7 +536,7 @@ std::string AtomBrowserClient::GetGeolocationApiKey() {
   return api_key;
 }
 
-content::QuotaPermissionContext*
+scoped_refptr<content::QuotaPermissionContext>
 AtomBrowserClient::CreateQuotaPermissionContext() {
   return new AtomQuotaPermissionContext;
 }
@@ -686,7 +691,20 @@ network::mojom::NetworkContextPtr AtomBrowserClient::CreateNetworkContext(
     const base::FilePath& /*relative_partition_path*/) {
   if (!browser_context)
     return nullptr;
-  return static_cast<AtomBrowserContext*>(browser_context)->GetNetworkContext();
+
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    return NetworkContextServiceFactory::GetForContext(browser_context)
+        ->CreateNetworkContext();
+  } else {
+    return static_cast<AtomBrowserContext*>(browser_context)
+        ->GetNetworkContext();
+  }
+}
+
+network::mojom::NetworkContext* AtomBrowserClient::GetSystemNetworkContext() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(g_browser_process->system_network_context_manager());
+  return g_browser_process->system_network_context_manager()->GetContext();
 }
 
 void AtomBrowserClient::RegisterOutOfProcessServices(
@@ -730,7 +748,7 @@ content::BrowserMainParts* AtomBrowserClient::CreateBrowserMainParts(
 
 void AtomBrowserClient::WebNotificationAllowed(
     int render_process_id,
-    const base::Callback<void(bool, bool)>& callback) {
+    const base::RepeatingCallback<void(bool, bool)>& callback) {
   content::WebContents* web_contents =
       WebContentsPreferences::GetWebContentsFromProcessID(render_process_id);
   if (!web_contents) {
@@ -776,14 +794,10 @@ void AtomBrowserClient::RenderProcessExited(
 }
 
 void OnOpenExternal(const GURL& escaped_url, bool allowed) {
-  if (allowed)
+  if (allowed) {
     platform_util::OpenExternal(
-#if defined(OS_WIN)
-        base::UTF8ToUTF16(escaped_url.spec()),
-#else
-        escaped_url,
-#endif
-        platform_util::OpenExternalOptions());
+        escaped_url, platform_util::OpenExternalOptions(), base::DoNothing());
+  }
 }
 
 void HandleExternalProtocolInUI(
@@ -814,7 +828,11 @@ bool AtomBrowserClient::HandleExternalProtocol(
     ui::PageTransition page_transition,
     bool has_user_gesture,
     const std::string& method,
-    const net::HttpRequestHeaders& headers) {
+    const net::HttpRequestHeaders& headers,
+    network::mojom::URLLoaderFactoryRequest* factory_request,
+    // clang-format off
+    network::mojom::URLLoaderFactory*& out_factory) {  // NOLINT
+  // clang-format on
   base::PostTaskWithTraits(
       FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&HandleExternalProtocolInUI, url, web_contents_getter,
@@ -847,7 +865,8 @@ NotificationPresenter* AtomBrowserClient::GetNotificationPresenter() {
 }
 
 content::PlatformNotificationService*
-AtomBrowserClient::GetPlatformNotificationService() {
+AtomBrowserClient::GetPlatformNotificationService(
+    content::BrowserContext* browser_context) {
   if (!notification_service_) {
     notification_service_.reset(new PlatformNotificationService(this));
   }
@@ -872,10 +891,21 @@ AtomBrowserClient::GetSystemSharedURLLoaderFactory() {
 
 void AtomBrowserClient::OnNetworkServiceCreated(
     network::mojom::NetworkService* network_service) {
-  if (!g_browser_process)
+  if (!g_browser_process ||
+      !base::FeatureList::IsEnabled(network::features::kNetworkService))
     return;
+
   g_browser_process->system_network_context_manager()->OnNetworkServiceCreated(
       network_service);
+}
+
+std::vector<base::FilePath>
+AtomBrowserClient::GetNetworkContextsParentDirectory() {
+  base::FilePath user_data_dir;
+  base::PathService::Get(DIR_USER_DATA, &user_data_dir);
+  DCHECK(!user_data_dir.empty());
+
+  return {user_data_dir};
 }
 
 bool AtomBrowserClient::ShouldBypassCORB(int render_process_id) const {
@@ -890,7 +920,42 @@ std::string AtomBrowserClient::GetProduct() const {
 }
 
 std::string AtomBrowserClient::GetUserAgent() const {
-  return GetApplicationUserAgent();
+  if (user_agent_override_.empty())
+    return GetApplicationUserAgent();
+  return user_agent_override_;
+}
+
+void AtomBrowserClient::SetUserAgent(const std::string& user_agent) {
+  user_agent_override_ = user_agent;
+}
+
+void AtomBrowserClient::RegisterNonNetworkNavigationURLLoaderFactories(
+    int frame_tree_node_id,
+    NonNetworkURLLoaderFactoryMap* factories) {
+  content::WebContents* web_contents =
+      content::WebContents::FromFrameTreeNodeId(frame_tree_node_id);
+  api::ProtocolNS* protocol = api::ProtocolNS::FromWrappedClass(
+      v8::Isolate::GetCurrent(), web_contents->GetBrowserContext());
+  if (protocol)
+    protocol->RegisterURLLoaderFactories(factories);
+}
+
+void AtomBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories(
+    int render_process_id,
+    int render_frame_id,
+    NonNetworkURLLoaderFactoryMap* factories) {
+  // Chromium may call this even when NetworkService is not enabled.
+  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
+    return;
+
+  content::RenderFrameHost* frame_host =
+      content::RenderFrameHost::FromID(render_process_id, render_frame_id);
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(frame_host);
+  api::ProtocolNS* protocol = api::ProtocolNS::FromWrappedClass(
+      v8::Isolate::GetCurrent(), web_contents->GetBrowserContext());
+  if (protocol)
+    protocol->RegisterURLLoaderFactories(factories);
 }
 
 std::string AtomBrowserClient::GetApplicationLocale() {

@@ -1,4 +1,4 @@
-import { deprecate, webFrame } from 'electron'
+import { remote, webFrame } from 'electron'
 
 import * as ipcRendererUtils from '@electron/internal/renderer/ipc-renderer-internal-utils'
 import * as guestViewInternal from '@electron/internal/renderer/web-view/guest-view-internal'
@@ -9,7 +9,7 @@ import {
   asyncPromiseMethods
 } from '@electron/internal/common/web-view-methods'
 
-const v8Util = process.atomBinding('v8_util')
+const v8Util = process.electronBinding('v8_util')
 
 // ID generator.
 let nextId = 0
@@ -219,17 +219,25 @@ export const setupAttributes = () => {
 // I wish eslint wasn't so stupid, but it is
 // eslint-disable-next-line
 export const setupMethods = (WebViewElement: typeof ElectronInternal.WebViewElement) => {
+  WebViewElement.prototype.getWebContentsId = function () {
+    const internal = v8Util.getHiddenValue<WebViewImpl>(this, 'internal')
+    if (!internal.guestInstanceId) {
+      throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.')
+    }
+    return internal.guestInstanceId
+  }
+
   // WebContents associated with this webview.
   WebViewElement.prototype.getWebContents = function () {
-    const { getRemote } = require('@electron/internal/renderer/remote')
-    const getGuestWebContents = getRemote('getGuestWebContents')
+    if (!remote) {
+      throw new Error('getGuestWebContents requires remote, which is not enabled')
+    }
     const internal = v8Util.getHiddenValue<WebViewImpl>(this, 'internal')
-
     if (!internal.guestInstanceId) {
       internal.createGuestSync()
     }
 
-    return getGuestWebContents(internal.guestInstanceId)
+    return (remote as Electron.RemoteInternal).getGuestWebContents(internal.guestInstanceId!)
   }
 
   // Focusing the webview should move page focus to the underlying iframe.
@@ -237,18 +245,10 @@ export const setupMethods = (WebViewElement: typeof ElectronInternal.WebViewElem
     this.contentWindow.focus()
   }
 
-  const getGuestInstanceId = function (self: any) {
-    const internal = v8Util.getHiddenValue<WebViewImpl>(self, 'internal')
-    if (!internal.guestInstanceId) {
-      throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.')
-    }
-    return internal.guestInstanceId
-  }
-
   // Forward proto.foo* method calls to WebViewImpl.foo*.
   const createBlockHandler = function (method: string) {
-    return function (this: any, ...args: Array<any>) {
-      return ipcRendererUtils.invokeSync('ELECTRON_GUEST_VIEW_MANAGER_CALL', getGuestInstanceId(this), method, args)
+    return function (this: ElectronInternal.WebViewElement, ...args: Array<any>) {
+      return ipcRendererUtils.invokeSync('ELECTRON_GUEST_VIEW_MANAGER_CALL', this.getWebContentsId(), method, args)
     }
   }
 
@@ -257,8 +257,8 @@ export const setupMethods = (WebViewElement: typeof ElectronInternal.WebViewElem
   }
 
   const createNonBlockHandler = function (method: string) {
-    return function (this: any, ...args: Array<any>) {
-      ipcRendererUtils.invoke('ELECTRON_GUEST_VIEW_MANAGER_CALL', getGuestInstanceId(this), method, args)
+    return function (this: ElectronInternal.WebViewElement, ...args: Array<any>) {
+      ipcRendererUtils.invoke('ELECTRON_GUEST_VIEW_MANAGER_CALL', this.getWebContentsId(), method, args)
     }
   }
 
@@ -267,13 +267,13 @@ export const setupMethods = (WebViewElement: typeof ElectronInternal.WebViewElem
   }
 
   const createPromiseHandler = function (method: string) {
-    return function (this: any, ...args: Array<any>) {
-      return ipcRendererUtils.invoke('ELECTRON_GUEST_VIEW_MANAGER_CALL', getGuestInstanceId(this), method, args)
+    return function (this: ElectronInternal.WebViewElement, ...args: Array<any>) {
+      return ipcRendererUtils.invoke('ELECTRON_GUEST_VIEW_MANAGER_CALL', this.getWebContentsId(), method, args)
     }
   }
 
   for (const method of asyncPromiseMethods) {
-    (WebViewElement.prototype as Record<string, any>)[method] = deprecate.promisify(createPromiseHandler(method))
+    (WebViewElement.prototype as Record<string, any>)[method] = createPromiseHandler(method)
   }
 }
 

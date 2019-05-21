@@ -1,7 +1,8 @@
-import { ipcRendererInternal } from '@electron/internal/renderer/ipc-renderer-internal'
 import { webFrame } from 'electron'
 
-const v8Util = process.atomBinding('v8_util')
+import * as ipcRendererUtils from '@electron/internal/renderer/ipc-renderer-internal-utils'
+
+const v8Util = process.electronBinding('v8_util')
 
 const IsolatedWorldIDs = {
   /**
@@ -20,11 +21,15 @@ const getIsolatedWorldIdForInstance = () => {
   return isolatedWorldIds++
 }
 
+const escapePattern = function (pattern: string) {
+  return pattern.replace(/[\\^$+?.()|[\]{}]/g, '\\$&')
+}
+
 // Check whether pattern matches.
 // https://developer.chrome.com/extensions/match_patterns
 const matchesPattern = function (pattern: string) {
   if (pattern === '<all_urls>') return true
-  const regexp = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`)
+  const regexp = new RegExp(`^${pattern.split('*').map(escapePattern).join('.*')}$`)
   const url = `${location.protocol}//${location.host}${location.pathname}`
   return url.match(regexp)
 }
@@ -45,7 +50,7 @@ const runContentScript = function (this: any, extensionId: string, url: string, 
   })
 
   const sources = [{ code, url }]
-  webFrame.executeJavaScriptInIsolatedWorld(worldId, sources)
+  return webFrame.executeJavaScriptInIsolatedWorld(worldId, sources)
 }
 
 const runAllContentScript = function (scripts: Array<Electron.InjectionBase>, extensionId: string) {
@@ -94,16 +99,13 @@ const injectContentScript = function (extensionId: string, script: Electron.Cont
 }
 
 // Handle the request of chrome.tabs.executeJavaScript.
-ipcRendererInternal.on('CHROME_TABS_EXECUTESCRIPT', function (
+ipcRendererUtils.handle('CHROME_TABS_EXECUTE_SCRIPT', function (
   event: Electron.Event,
-  senderWebContentsId: number,
-  requestId: number,
   extensionId: string,
   url: string,
   code: string
 ) {
-  const result = runContentScript.call(window, extensionId, url, code)
-  ipcRendererInternal.sendToAll(senderWebContentsId, `CHROME_TABS_EXECUTESCRIPT_RESULT_${requestId}`, result)
+  return runContentScript.call(window, extensionId, url, code)
 })
 
 module.exports = (getRenderProcessPreferences: typeof process.getRenderProcessPreferences) => {

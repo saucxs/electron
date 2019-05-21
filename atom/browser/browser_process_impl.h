@@ -114,6 +114,7 @@ class BrowserProcessImpl : public BrowserProcess {
   void SetApplicationLocale(const std::string& locale) override;
   const std::string& GetApplicationLocale() override;
   printing::PrintJobManager* print_job_manager() override;
+  StartupData* startup_data() override;
 
  private:
 #if BUILDFLAG(ENABLE_PRINTING)
@@ -122,7 +123,6 @@ class BrowserProcessImpl : public BrowserProcess {
   std::unique_ptr<PrefService> local_state_;
   std::unique_ptr<IOThread> io_thread_;
   std::unique_ptr<net_log::ChromeNetLog> net_log_;
-  std::unique_ptr<SystemNetworkContextManager> system_network_context_manager_;
   std::string locale_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);

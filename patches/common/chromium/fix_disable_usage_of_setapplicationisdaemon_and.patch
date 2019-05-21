@@ -4,15 +4,14 @@ Date: Mon, 4 Mar 2019 14:51:45 -0800
 Subject: fix: disable usage of SetApplicationIsDaemon and
  _LSSetApplicationLaunchServicesServerConnectionStatus in MAS builds
 
-
 diff --git a/content/utility/utility_service_factory.cc b/content/utility/utility_service_factory.cc
-index 4450cc711772c600f138acb5458eb8ab0801ecf5..58e81aac8f8c97e5a3b3cd32b4d95789e14d2d31 100644
+index 2e098ff3c2d0052984a96ffc72e393a20418b445..bf07ae34c286f03225535f6082a9151f12a3a5f2 100644
 --- a/content/utility/utility_service_factory.cc
 +++ b/content/utility/utility_service_factory.cc
-@@ -195,7 +195,7 @@ void UtilityServiceFactory::RunNetworkServiceOnIOThread(
+@@ -207,7 +207,7 @@ void UtilityServiceFactory::RunService(
  std::unique_ptr<service_manager::Service>
  UtilityServiceFactory::CreateAudioService(
-     service_manager::mojom::ServiceRequest request) {
+     mojo::PendingReceiver<service_manager::mojom::Service> receiver) {
 -#if defined(OS_MACOSX)
 +#if defined(OS_MACOSX) && !defined(MAS_BUILD)
    // Don't connect to launch services when running sandboxed

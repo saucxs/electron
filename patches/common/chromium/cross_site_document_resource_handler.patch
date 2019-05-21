@@ -8,10 +8,10 @@ this patch can be removed once we switch to network service,
 where the embedders have a chance to design their URLLoaders.
 
 diff --git a/content/browser/loader/cross_site_document_resource_handler.cc b/content/browser/loader/cross_site_document_resource_handler.cc
-index f86a9167ac1ec5e7b082e474eb4b5f217d06df92..47df32ecb078a8f18e474f5c38faf2c7bdab30a1 100644
+index 9e65e50de1d45d8435145b56bf7108a8c0272065..3103e4caa2adf853277774092cbd645fd8ece952 100644
 --- a/content/browser/loader/cross_site_document_resource_handler.cc
 +++ b/content/browser/loader/cross_site_document_resource_handler.cc
-@@ -673,6 +673,9 @@ bool CrossSiteDocumentResourceHandler::ShouldBlockBasedOnHeaders(
+@@ -666,6 +666,9 @@ bool CrossSiteDocumentResourceHandler::ShouldBlockBasedOnHeaders(
      return false;
    }
  
@@ -22,7 +22,7 @@ index f86a9167ac1ec5e7b082e474eb4b5f217d06df92..47df32ecb078a8f18e474f5c38faf2c7
  }
  
 diff --git a/content/public/browser/content_browser_client.cc b/content/public/browser/content_browser_client.cc
-index 8a4f94786e75c7abecd1a53fd6f0c2c0421534db..204637b78b36b3fb0d21804295b4de73a295de5d 100644
+index d31af66d884a36b1f10ba845bd3df77394296cf1..f57d0f9d0aef241e648a6a4a3aa390efcf16c690 100644
 --- a/content/public/browser/content_browser_client.cc
 +++ b/content/public/browser/content_browser_client.cc
 @@ -61,6 +61,10 @@ ContentBrowserClient::SiteInstanceForNavigationType ContentBrowserClient::Should
@@ -37,7 +37,7 @@ index 8a4f94786e75c7abecd1a53fd6f0c2c0421534db..204637b78b36b3fb0d21804295b4de73
      const MainFunctionParams& parameters) {
    return nullptr;
 diff --git a/content/public/browser/content_browser_client.h b/content/public/browser/content_browser_client.h
-index bbc4263798a4cf13c0a6f3d7d62f01eb1dfe4784..1551bbad5e1a30fe6e83f85d9f66a4b18bc1bca1 100644
+index 87967723939dc85f89ed0be793f3371200860e45..ec60fa98d994b07881dbb15d397f8b7844af911a 100644
 --- a/content/public/browser/content_browser_client.h
 +++ b/content/public/browser/content_browser_client.h
 @@ -241,6 +241,9 @@ class CONTENT_EXPORT ContentBrowserClient {

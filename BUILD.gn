@@ -2,6 +2,7 @@ import("//build/config/locales.gni")
 import("//build/config/ui.gni")
 import("//build/config/win/manifest.gni")
 import("//pdf/features.gni")
+import("//printing/buildflags/buildflags.gni")
 import("//third_party/ffmpeg/ffmpeg_options.gni")
 import("//tools/generate_library_loader/generate_library_loader.gni")
 import("//tools/grit/grit_rule.gni")
@@ -9,6 +10,7 @@ import("//tools/grit/repack.gni")
 import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
 import("//v8/snapshot_toolchain.gni")
 import("build/asar.gni")
+import("build/js_wrap.gni")
 import("build/npm.gni")
 import("build/tsc.gni")
 import("buildflags/buildflags.gni")
@@ -62,31 +64,23 @@ config("branding") {
 npm_action("build_electron_definitions") {
   script = "gn-typescript-definitions"
   args = [ rebase_path("$target_gen_dir/tsc/typings/electron.d.ts") ]
-  inputs = auto_filenames.api_docs + [ "package-lock.json" ]
+  inputs = auto_filenames.api_docs + [ "yarn.lock" ]
 
   outputs = [
     "$target_gen_dir/tsc/typings/electron.d.ts",
   ]
 }
 
-npm_action("atom_browserify_sandbox") {
+npm_action("atom_browserify_sandbox_unwrapped") {
   script = "browserify"
   deps = [
     ":build_electron_definitions",
   ]
 
-  inputs = [
-    # FIXME(zcbenz): The dependencies of these files are not listed here, so
-    # the generated file will be out-dated when dependencies are modified.
-    # Use a script to generate all dependencies and put them here.
-    "lib/sandboxed_renderer/init.js",
-    "lib/sandboxed_renderer/api/exports/electron.js",
-    "tsconfig.electron.json",
-    "tsconfig.json",
-  ]
+  inputs = auto_filenames.sandbox_browserify_deps
 
   outputs = [
-    "$target_gen_dir/js2c/preload_bundle.js",
+    "$target_gen_dir/js2c/sandbox_bundle_unwrapped.js",
   ]
 
   args = [
@@ -101,25 +95,23 @@ npm_action("atom_browserify_sandbox") {
     "-p",
     "tsconfig.electron.json",
     "]",
+    "--standalone",
+    "sandboxed_preload",
     "-o",
     rebase_path(outputs[0]),
   ]
 }
 
-npm_action("atom_browserify_isolated") {
+npm_action("atom_browserify_isolated_unwrapped") {
   script = "browserify"
   deps = [
     ":build_electron_definitions",
   ]
 
-  inputs = [
-    "lib/isolated_renderer/init.js",
-    "tsconfig.electron.json",
-    "tsconfig.json",
-  ]
+  inputs = auto_filenames.isolated_browserify_deps
 
   outputs = [
-    "$target_gen_dir/js2c/isolated_bundle.js",
+    "$target_gen_dir/js2c/isolated_bundle_unwrapped.js",
   ]
 
   args = [
@@ -132,39 +124,81 @@ npm_action("atom_browserify_isolated") {
     "-p",
     "tsconfig.electron.json",
     "]",
+    "--standalone",
+    "isolated_preload",
     "-o",
     rebase_path(outputs[0]),
   ]
 }
 
-npm_action("atom_browserify_content_script") {
+npm_action("atom_browserify_content_script_unwrapped") {
   script = "browserify"
   deps = [
     ":build_electron_definitions",
   ]
 
-  inputs = [
+  inputs = auto_filenames.context_script_browserify_deps
+
+  outputs = [
+    "$target_gen_dir/js2c/content_script_bundle_unwrapped.js",
+  ]
+
+  args = [
     "lib/content_script/init.js",
+    "-t",
+    "aliasify",
+    "-p",
+    "[",
+    "tsify",
+    "-p",
     "tsconfig.electron.json",
-    "tsconfig.json",
+    "]",
+    "--standalone",
+    "content_script_preload",
+    "-o",
+    rebase_path(outputs[0]),
+  ]
+}
+
+js_wrap("atom_browserify_content_script") {
+  deps = [
+    ":atom_browserify_content_script_unwrapped",
+  ]
+
+  inputs = [
+    "$target_gen_dir/js2c/content_script_bundle_unwrapped.js",
   ]
 
   outputs = [
     "$target_gen_dir/js2c/content_script_bundle.js",
   ]
+}
 
-  args = [
-    "lib/content_script/init.js",
-    "-t",
-    "aliasify",
-    "-p",
-    "[",
-    "tsify",
-    "-p",
-    "tsconfig.electron.json",
-    "]",
-    "-o",
-    rebase_path(outputs[0]),
+js_wrap("atom_browserify_isolated") {
+  deps = [
+    ":atom_browserify_isolated_unwrapped",
+  ]
+
+  inputs = [
+    "$target_gen_dir/js2c/isolated_bundle_unwrapped.js",
+  ]
+
+  outputs = [
+    "$target_gen_dir/js2c/isolated_bundle.js",
+  ]
+}
+
+js_wrap("atom_browserify_sandbox") {
+  deps = [
+    ":atom_browserify_sandbox_unwrapped",
+  ]
+
+  inputs = [
+    "$target_gen_dir/js2c/sandbox_bundle_unwrapped.js",
+  ]
+
+  outputs = [
+    "$target_gen_dir/js2c/sandbox_bundle.js",
   ]
 }
 
@@ -189,7 +223,7 @@ action("atom_js2c") {
   browserify_sources = [
     "$target_gen_dir/js2c/content_script_bundle.js",
     "$target_gen_dir/js2c/isolated_bundle.js",
-    "$target_gen_dir/js2c/preload_bundle.js",
+    "$target_gen_dir/js2c/sandbox_bundle.js",
   ]
 
   sources = browserify_sources + [
@@ -351,6 +385,30 @@ if (is_linux) {
   }
 }
 
+source_set("manifests") {
+  sources = [
+    "//electron/atom/app/manifests.cc",
+    "//electron/atom/app/manifests.h",
+  ]
+
+  include_dirs = [ "//electron" ]
+
+  deps = [
+    "//electron/atom/common/api:mojo",
+    "//printing/buildflags",
+    "//services/proxy_resolver/public/cpp:manifest",
+    "//services/service_manager/public/cpp",
+  ]
+
+  if (enable_basic_printing) {
+    deps += [ "//components/services/pdf_compositor/public/cpp:manifest" ]
+  }
+
+  if (enable_print_preview) {
+    deps += [ "//chrome/services/printing/public/cpp:manifest" ]
+  }
+}
+
 static_library("electron_lib") {
   configs += [ "//v8:external_startup_data" ]
   configs += [ "//third_party/electron_node:node_internals" ]
@@ -359,10 +417,11 @@ static_library("electron_lib") {
 
   deps = [
     ":atom_js2c",
+    ":manifests",
     ":resources",
+    "atom/common/api:mojo",
     "buildflags",
     "chromium_src:chrome",
-    "manifests",
     "native_mate",
     "//base:base_static",
     "//base/allocator:buildflags",
@@ -377,6 +436,7 @@ static_library("electron_lib") {
     "//content/public/browser",
     "//content/public/child",
     "//content/public/common:service_names",
+    "//content/public/gpu",
     "//content/public/renderer",
     "//content/public/utility",
     "//device/bluetooth",
@@ -404,6 +464,7 @@ static_library("electron_lib") {
     "//third_party/libyuv",
     "//third_party/webrtc_overrides:init_webrtc",
     "//third_party/widevine/cdm:headers",
+    "//ui/base/idle",
     "//ui/events:dom_keycode_converter",
     "//ui/gl",
     "//ui/native_theme",
@@ -487,6 +548,7 @@ static_library("electron_lib") {
     deps += [
       "//third_party/crashpad/crashpad/client",
       "//ui/accelerated_widget_mac",
+      "//ui/views_bridge_mac",
     ]
     sources += [
       "atom/browser/ui/views/autofill_popup_view.cc",
@@ -572,11 +634,13 @@ static_library("electron_lib") {
 
   if (enable_osr) {
     sources += [
-      "atom/browser/osr/osr_output_device.cc",
-      "atom/browser/osr/osr_output_device.h",
+      "atom/browser/osr/osr_host_display_client.cc",
+      "atom/browser/osr/osr_host_display_client.h",
+      "atom/browser/osr/osr_host_display_client_mac.mm",
       "atom/browser/osr/osr_render_widget_host_view.cc",
       "atom/browser/osr/osr_render_widget_host_view.h",
-      "atom/browser/osr/osr_render_widget_host_view_mac.mm",
+      "atom/browser/osr/osr_video_consumer.cc",
+      "atom/browser/osr/osr_video_consumer.h",
       "atom/browser/osr/osr_view_proxy.cc",
       "atom/browser/osr/osr_view_proxy.h",
       "atom/browser/osr/osr_web_contents_view.cc",
@@ -751,6 +815,11 @@ if (is_mac) {
       "ServiceManagement.framework",
       "StoreKit.framework",
     ]
+
+    if (enable_osr) {
+      libs += [ "IOSurface.framework" ]
+    }
+
     ldflags = [
       "-F",
       rebase_path("external_binaries", root_build_dir),
@@ -1000,6 +1069,7 @@ template("dist_zip") {
                              "deps",
                              "data_deps",
                              "data",
+                             "testonly",
                            ])
     write_runtime_deps = _runtime_deps_file
   }
@@ -1009,7 +1079,11 @@ template("dist_zip") {
     deps = [
       ":$_runtime_deps_target",
     ]
-    forward_variables_from(invoker, [ "outputs" ])
+    forward_variables_from(invoker,
+                           [
+                             "outputs",
+                             "testonly",
+                           ])
     args = rebase_path(outputs + [ _runtime_deps_file ], root_build_dir) + [
              target_cpu,
              target_os,
@@ -1077,6 +1151,7 @@ dist_zip("electron_ffmpeg_zip") {
 }
 
 dist_zip("electron_chromedriver_zip") {
+  testonly = true
   data_deps = [
     "//chrome/test/chromedriver",
     ":licenses",

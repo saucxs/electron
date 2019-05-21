@@ -33,6 +33,7 @@ const deprecate: ElectronInternal.DeprecationUtil = {
     }
   },
 
+  // change the name of a function
   function: (fn, newName) => {
     const warn = warnOnce(fn.name, newName)
     return function (this: any) {
@@ -41,6 +42,7 @@ const deprecate: ElectronInternal.DeprecationUtil = {
     }
   },
 
+  // change the name of an event
   event: (emitter, oldName, newName) => {
     const warn = newName.startsWith('-') /* internal event */
       ? warnOnce(`${oldName} event`)
@@ -53,6 +55,21 @@ const deprecate: ElectronInternal.DeprecationUtil = {
     })
   },
 
+  // deprecate a getter/setter function pair in favor of a property
+  fnToProperty: (module: any, prop: string, getter: string, setter: string) => {
+    const withWarnOnce = (obj: any, key: any, oldName: string, newName: string) => {
+      const warn = warnOnce(oldName, newName)
+      return (...args: any) => {
+        warn()
+        return obj[key](...args)
+      }
+    }
+
+    module[getter.substr(1)] = withWarnOnce(module, getter, `${getter.substr(1)} function`, `${prop} property`)
+    module[setter.substr(1)] = withWarnOnce(module, setter, `${setter.substr(1)} function`, `${prop} property`)
+  },
+
+  // remove a property with no replacement
   removeProperty: (o, removedName) => {
     // if the property's already been removed, warn about it
     if (!(removedName in o)) {
@@ -75,6 +92,7 @@ const deprecate: ElectronInternal.DeprecationUtil = {
     })
   },
 
+  // deprecate a callback-based function in favor of one returning a Promise
   promisify: <T extends (...args: any[]) => any>(fn: T): T => {
     const fnName = fn.name || 'function'
     const oldName = `${fnName} with callbacks`
@@ -94,15 +112,18 @@ const deprecate: ElectronInternal.DeprecationUtil = {
           process.nextTick(() => {
             cb!.length === 2 ? cb!(null, res) : cb!(res)
           })
+          return res
         }, (err: Error) => {
           process.nextTick(() => {
             cb!.length === 2 ? cb!(err) : cb!()
           })
+          throw err
         })
     } as T
   },
 
   // convertPromiseValue: Temporarily disabled until it's used
+  // deprecate a callback-based function in favor of one returning a Promise
   promisifyMultiArg: <T extends (...args: any[]) => any>(fn: T /* convertPromiseValue: (v: any) => any */): T => {
     const fnName = fn.name || 'function'
     const oldName = `${fnName} with callbacks`
@@ -129,6 +150,7 @@ const deprecate: ElectronInternal.DeprecationUtil = {
     } as T
   },
 
+  // change the name of a property
   renameProperty: (o, oldName, newName) => {
     const warn = warnOnce(oldName, newName)
 

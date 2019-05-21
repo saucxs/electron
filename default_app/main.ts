@@ -98,13 +98,11 @@ function loadApplicationPackage (packagePath: string) {
         app.setVersion(packageJson.version)
       }
       if (packageJson.productName) {
-        app.setName(packageJson.productName)
+        app.name = packageJson.productName
       } else if (packageJson.name) {
-        app.setName(packageJson.name)
+        app.name = packageJson.name
       }
-      app.setPath('userData', path.join(app.getPath('appData'), app.getName()))
-      app.setPath('userCache', path.join(app.getPath('cache'), app.getName()))
-      app.setAppPath(packagePath)
+      app._setDefaultAppPaths(packagePath)
     }
 
     try {

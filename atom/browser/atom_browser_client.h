@@ -64,6 +64,9 @@ class AtomBrowserClient : public content::ContentBrowserClient,
   // content::ContentBrowserClient:
   bool ShouldEnableStrictSiteIsolation() override;
 
+  std::string GetUserAgent() const override;
+  void SetUserAgent(const std::string& user_agent);
+
  protected:
   void RenderProcessWillLaunch(
       content::RenderProcessHost* host,
@@ -90,7 +93,8 @@ class AtomBrowserClient : public content::ContentBrowserClient,
       base::CommandLine* command_line) override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
   std::string GetGeolocationApiKey() override;
-  content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
+  scoped_refptr<content::QuotaPermissionContext> CreateQuotaPermissionContext()
+      override;
   content::GeneratedCodeCacheSettings GetGeneratedCodeCacheSettings(
       content::BrowserContext* context) override;
   void AllowCertificateError(
@@ -137,14 +141,15 @@ class AtomBrowserClient : public content::ContentBrowserClient,
       content::BrowserContext* browser_context,
       bool in_memory,
       const base::FilePath& relative_partition_path) override;
+  network::mojom::NetworkContext* GetSystemNetworkContext() override;
   void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) override;
   base::Optional<service_manager::Manifest> GetServiceManifestOverlay(
       base::StringPiece name) override;
   net::NetLog* GetNetLog() override;
   content::MediaObserver* GetMediaObserver() override;
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
-  content::PlatformNotificationService* GetPlatformNotificationService()
-      override;
+  content::PlatformNotificationService* GetPlatformNotificationService(
+      content::BrowserContext* browser_context) override;
   content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams&) override;
   base::FilePath GetDefaultDownloadDirectory() override;
@@ -152,9 +157,16 @@ class AtomBrowserClient : public content::ContentBrowserClient,
   GetSystemSharedURLLoaderFactory() override;
   void OnNetworkServiceCreated(
       network::mojom::NetworkService* network_service) override;
+  std::vector<base::FilePath> GetNetworkContextsParentDirectory() override;
   bool ShouldBypassCORB(int render_process_id) const override;
   std::string GetProduct() const override;
-  std::string GetUserAgent() const override;
+  void RegisterNonNetworkNavigationURLLoaderFactories(
+      int frame_tree_node_id,
+      NonNetworkURLLoaderFactoryMap* factories) override;
+  void RegisterNonNetworkSubresourceURLLoaderFactories(
+      int render_process_id,
+      int render_frame_id,
+      NonNetworkURLLoaderFactoryMap* factories) override;
 
   // content::RenderProcessHostObserver:
   void RenderProcessHostDestroyed(content::RenderProcessHost* host) override;
@@ -171,7 +183,12 @@ class AtomBrowserClient : public content::ContentBrowserClient,
       ui::PageTransition page_transition,
       bool has_user_gesture,
       const std::string& method,
-      const net::HttpRequestHeaders& headers) override;
+      const net::HttpRequestHeaders& headers,
+      network::mojom::URLLoaderFactoryRequest* factory_request,
+      // clang-format off
+      network::mojom::URLLoaderFactory*& out_factory)  // NOLINT
+      // clang-format on
+      override;
 
  private:
   struct ProcessPreferences {
@@ -224,6 +241,8 @@ class AtomBrowserClient : public content::ContentBrowserClient,
 
   mutable base::Lock process_preferences_lock_;
   std::map<int, ProcessPreferences> process_preferences_;
+
+  std::string user_agent_override_ = "";
 
   DISALLOW_COPY_AND_ASSIGN(AtomBrowserClient);
 };

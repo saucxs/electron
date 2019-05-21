@@ -13,6 +13,7 @@ declare namespace Electron {
   }
 
   interface App {
+    _setDefaultAppPaths(packagePath: string | null): void;
     setVersion(version: string): void;
     setDesktopName(name: string): void;
     setAppPath(path: string | null): void;
@@ -55,6 +56,15 @@ declare namespace Electron {
     sendToAll(webContentsId: number, channel: string, ...args: any[]): void
   }
 
+  interface RemoteInternal extends Electron.Remote {
+    getGuestWebContents(guestInstanceId: number): Electron.WebContents;
+  }
+
+  interface WebContentsInternal extends Electron.WebContents {
+    _sendInternal(channel: string, ...args: any[]): void;
+    _sendInternalToAll(channel: string, ...args: any[]): void;
+  }
+
   const deprecate: ElectronInternal.DeprecationUtil;
 }
 
@@ -67,6 +77,7 @@ declare namespace ElectronInternal {
     log(message: string): void;
     function(fn: Function, newName: string): Function;
     event(emitter: NodeJS.EventEmitter, oldName: string, newName: string): void;
+    fnToProperty(module: any, prop: string, getter: string, setter: string): void;
     removeProperty<T, K extends (keyof T & string)>(object: T, propertyName: K): T;
     renameProperty<T, K extends (keyof T & string)>(object: T, oldName: string, newName: K): T;
 
@@ -81,7 +92,7 @@ declare namespace ElectronInternal {
     _replyInternal(...args: any[]): void;
   }
 
-  interface IpcMainInternal extends Electron.EventEmitter {
+  interface IpcMainInternal extends NodeJS.EventEmitter {
     on(channel: string, listener: (event: IpcMainInternalEvent, ...args: any[]) => void): this;
     once(channel: string, listener: (event: IpcMainInternalEvent, ...args: any[]) => void): this;
   }
@@ -112,6 +123,7 @@ declare namespace ElectronInternal {
 
     // Created in web-view-impl
     public getWebContents(): Electron.WebContents;
+    public getWebContentsId(): number;
   }
 }
 

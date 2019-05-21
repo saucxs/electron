@@ -12,6 +12,7 @@
 #include "atom/common/promise_util.h"
 #include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "content/public/browser/tracing_controller.h"
 #include "native_mate/dictionary.h"
 
@@ -52,22 +53,22 @@ struct Converter<base::trace_event::TraceConfig> {
 
 namespace {
 
-using CompletionCallback = base::Callback<void(const base::FilePath&)>;
+using CompletionCallback = base::RepeatingCallback<void(const base::FilePath&)>;
 
 scoped_refptr<TracingController::TraceDataEndpoint> GetTraceDataEndpoint(
     const base::FilePath& path,
     const CompletionCallback& callback) {
   base::FilePath result_file_path = path;
+
+  // base::CreateTemporaryFile prevents blocking so we need to allow it
+  // for now since offloading this to a different sequence would require
+  // changing the api shape
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   if (result_file_path.empty() && !base::CreateTemporaryFile(&result_file_path))
     LOG(ERROR) << "Creating temporary file failed";
 
   return TracingController::CreateFileEndpoint(
-      result_file_path, base::Bind(callback, result_file_path));
-}
-
-void OnRecordingStopped(const atom::util::CopyablePromise& promise,
-                        const base::FilePath& path) {
-  promise.GetPromise().Resolve(path);
+      result_file_path, base::BindRepeating(callback, result_file_path));
 }
 
 v8::Local<v8::Promise> StopRecording(v8::Isolate* isolate,
@@ -79,13 +80,10 @@ v8::Local<v8::Promise> StopRecording(v8::Isolate* isolate,
   // CreateFileEndpoint API accepts OnceCallback.
   TracingController::GetInstance()->StopTracing(GetTraceDataEndpoint(
       path,
-      base::Bind(&OnRecordingStopped, atom::util::CopyablePromise(promise))));
+      base::BindRepeating(atom::util::CopyablePromise::ResolveCopyablePromise<
+                              const base::FilePath&>,
+                          atom::util::CopyablePromise(promise))));
   return handle;
-}
-
-void OnCategoriesAvailable(atom::util::Promise promise,
-                           const std::set<std::string>& categories) {
-  promise.Resolve(categories);
 }
 
 v8::Local<v8::Promise> GetCategories(v8::Isolate* isolate) {
@@ -93,13 +91,11 @@ v8::Local<v8::Promise> GetCategories(v8::Isolate* isolate) {
   v8::Local<v8::Promise> handle = promise.GetHandle();
 
   // Note: This method always succeeds.
-  TracingController::GetInstance()->GetCategories(
-      base::BindOnce(&OnCategoriesAvailable, std::move(promise)));
-  return handle;
-}
+  TracingController::GetInstance()->GetCategories(base::BindOnce(
+      atom::util::Promise::ResolvePromise<const std::set<std::string>&>,
+      std::move(promise)));
 
-void OnTracingStarted(atom::util::Promise promise) {
-  promise.Resolve();
+  return handle;
 }
 
 v8::Local<v8::Promise> StartTracing(
@@ -110,7 +106,8 @@ v8::Local<v8::Promise> StartTracing(
 
   // Note: This method always succeeds.
   TracingController::GetInstance()->StartTracing(
-      trace_config, base::BindOnce(&OnTracingStarted, std::move(promise)));
+      trace_config, base::BindOnce(atom::util::Promise::ResolveEmptyPromise,
+                                   std::move(promise)));
   return handle;
 }
 

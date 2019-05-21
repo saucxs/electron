@@ -14,6 +14,8 @@
 
 #include "atom/app/atom_content_client.h"
 #include "atom/browser/atom_browser_client.h"
+#include "atom/browser/atom_gpu_client.h"
+#include "atom/browser/feature_list.h"
 #include "atom/browser/relauncher.h"
 #include "atom/common/options_switches.h"
 #include "atom/renderer/atom_renderer_client.h"
@@ -136,7 +138,10 @@ bool AtomMainDelegate::BasicStartupComplete(int* exit_code) {
 #if defined(DEBUG)
   // Print logging to debug.log on Windows
   settings.logging_dest = logging::LOG_TO_ALL;
-  settings.log_file = L"debug.log";
+  base::FilePath log_filename;
+  base::PathService::Get(base::DIR_EXE, &log_filename);
+  log_filename = log_filename.AppendASCII("debug.log");
+  settings.log_file = log_filename.value().c_str();
   settings.lock_log = logging::LOCK_LOG_FILE;
   settings.delete_old = logging::DELETE_OLD_LOG_FILE;
 #else
@@ -247,6 +252,10 @@ void AtomMainDelegate::PreSandboxStartup() {
 }
 
 void AtomMainDelegate::PreCreateMainMessageLoop() {
+  // This is initialized early because the service manager reads some feature
+  // flags and we need to make sure the feature list is initialized before the
+  // service manager reads the features.
+  InitializeFeatureList();
 #if defined(OS_MACOSX)
   RegisterAtomCrApp();
 #endif
@@ -255,6 +264,11 @@ void AtomMainDelegate::PreCreateMainMessageLoop() {
 content::ContentBrowserClient* AtomMainDelegate::CreateContentBrowserClient() {
   browser_client_.reset(new AtomBrowserClient);
   return browser_client_.get();
+}
+
+content::ContentGpuClient* AtomMainDelegate::CreateContentGpuClient() {
+  gpu_client_.reset(new AtomGpuClient);
+  return gpu_client_.get();
 }
 
 content::ContentRendererClient*
